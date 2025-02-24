@@ -8,7 +8,7 @@ from shapely.geometry import Polygon as ShapelyPolygon, box
 x_min, x_max = -6, 3.5
 y_min, y_max = -2.9, 2
 margin = 0.6  # Margin from the borders for data points
-centroid_margin = margin * 2  # Larger margin for centroids to offset them from the borders
+centroid_margin = margin * 2.1 # Larger margin for centroids to offset them from the borders
 
 def voronoi_finite_polygons_2d(vor, radius=None):
     """
@@ -145,7 +145,7 @@ class KMeansVoronoiScene(Scene):
             for _ in range(num_clusters)
         ]
         centroid_dots = VGroup()
-        colors = [RED, GREEN, BLUE, YELLOW]
+        colors = [RED, GREEN, BLUE, PURPLE]
         for i in range(num_clusters):
             centroid_dot = Dot(centroid_positions[i], radius=0.1, color=colors[i])
             centroid_dot.cluster_index = i
