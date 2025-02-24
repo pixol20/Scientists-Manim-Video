@@ -5,36 +5,24 @@ from scipy.spatial import Voronoi
 from shapely.geometry import Polygon as ShapelyPolygon, box
 
 # Define spawn area boundaries (leaving space at top for formulas)
-x_min, x_max = -5, 5
-y_min, y_max = -3, 2
+x_min, x_max = -6, 3.5
+y_min, y_max = -2.9, 2
+margin = 0.6  # Margin from the borders for data points
+centroid_margin = margin * 2  # Larger margin for centroids to offset them from the borders
 
 def voronoi_finite_polygons_2d(vor, radius=None):
     """
     Reconstruct infinite Voronoi regions in a 2D diagram to finite regions.
-    Parameters
-    ----------
-    vor : Voronoi
-        Input diagram.
-    radius : float, optional
-        Distance to 'points at infinity'.
-    Returns
-    -------
-    regions : list of list of ints
-        Indices of vertices in each revised Voronoi region.
-    vertices : ndarray
-        Coordinates for revised vertices.
     """
     if vor.points.shape[1] != 2:
         raise ValueError("Requires 2D input")
-
     new_regions = []
     new_vertices = vor.vertices.tolist()
-
     center = vor.points.mean(axis=0)
     if radius is None:
         radius = vor.points.ptp().max() * 2
 
-    # Construct a map containing all ridges for a given point.
+    # Map all ridges for each point.
     all_ridges = {}
     for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
         all_ridges.setdefault(p1, []).append((p2, v1, v2))
@@ -59,7 +47,6 @@ def voronoi_finite_polygons_2d(vor, radius=None):
             tangent = vor.points[p2] - vor.points[p1]
             tangent /= np.linalg.norm(tangent)
             normal = np.array([-tangent[1], tangent[0]])
-
             midpoint = vor.points[[p1, p2]].mean(axis=0)
             direction = np.sign(np.dot(midpoint - center, normal)) * normal
             far_point = vor.vertices[v2] + direction * radius
@@ -82,7 +69,7 @@ class KMeansVoronoiScene(Scene):
         # -------------------------------
 
         # -------------------------------
-        # ADD LONGER AXES AT LOWER LEFT WITH TEXT ALONG OPPOSITE SIDES
+        # DRAW LONG AXES AT LOWER LEFT WITH LABELS
         # -------------------------------
         x_axis = Arrow(ORIGIN, RIGHT * 10, buff=0, stroke_width=3, color=WHITE)
         y_axis = Arrow(ORIGIN, UP * 6, buff=0, stroke_width=3, color=WHITE)
@@ -97,11 +84,8 @@ class KMeansVoronoiScene(Scene):
         self.add(axes)
 
         # -------------------------------
-        # DRAW BOUNDARY OF THE SPAWN AREA
+        # DO NOT DRAW THE SPAWN AREA BORDER (removed white border)
         # -------------------------------
-        spawn_rect = Rectangle(width=(x_max - x_min), height=(y_max - y_min), color=WHITE)
-        spawn_rect.move_to(np.array([ (x_min+x_max)/2, (y_min+y_max)/2, 0 ]))
-        self.add(spawn_rect)
 
         # -------------------------------
         # PART 1: K-MEANS CLUSTERING ANIMATION
@@ -109,32 +93,45 @@ class KMeansVoronoiScene(Scene):
         num_clusters = 4
         points_per_cluster = 30
 
-        # Generate cluster centers within the spawn area.
+        # Use fixed cluster centers at selected areas with a larger offset from the borders:
+        #   - Low X, High Y
+        #   - Low X, Low Y
+        #   - Medium X, Medium Y
+        #   - High X, Low Y
         cluster_centers = [
-            np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
-            for _ in range(num_clusters)
+            np.array([x_min + centroid_margin, y_max - centroid_margin, 0]),  # Low X, High Y
+            np.array([x_min + centroid_margin, y_min + centroid_margin, 0]),  # Low X, Low Y
+            np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0]),             # Medium X, Medium Y
+            np.array([x_max - centroid_margin, y_min + centroid_margin, 0])       # High X, Low Y
         ]
 
-        # Create data points around each cluster center (with Gaussian noise).
+        # Create data points around each fixed cluster center (with Gaussian noise).
         data_dots = VGroup()
         for center in cluster_centers:
             for _ in range(points_per_cluster):
                 offset = np.random.normal(0, 0.5, size=2)
-                point_position = np.array([
+                raw_point = np.array([
                     center[0] + offset[0],
                     center[1] + offset[1],
                     0
                 ])
-                # (Optionally, one could force the point to be within bounds.)
+                # Clamp the point within bounds.
+                point_position = np.array([
+                    np.clip(raw_point[0], x_min + margin, x_max - margin),
+                    np.clip(raw_point[1], y_min + margin, y_max - margin),
+                    0
+                ])
                 dot = Dot(point_position, radius=0.05, color=WHITE)
                 data_dots.add(dot)
 
         self.play(FadeIn(data_dots), run_time=2)
         self.wait(1)
 
-        # Initialize centroids at random positions within the spawn area.
+        # Initialize centroids at random positions within the spawn area,
+        # ensuring they are offset from the borders by centroid_margin.
         centroid_positions = [
-            np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
+            np.array([random.uniform(x_min + centroid_margin, x_max - centroid_margin),
+                      random.uniform(y_min + centroid_margin, y_max - centroid_margin), 0])
             for _ in range(num_clusters)
         ]
         centroid_dots = VGroup()
@@ -173,7 +170,8 @@ class KMeansVoronoiScene(Scene):
                 if assigned_points:
                     new_pos = np.mean(assigned_points, axis=0)
                 else:
-                    new_pos = np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
+                    # If no points were assigned, keep the centroid in place.
+                    new_pos = centroid_dots[i].get_center()
                 new_centroid_positions.append(new_pos)
 
             centroid_anims = []
@@ -197,26 +195,20 @@ class KMeansVoronoiScene(Scene):
         # -------------------------------
         # PART 2: DRAW THE VORONOI DIAGRAM CLIPPED TO THE SPAWN AREA
         # -------------------------------
-        # Use the final centroid positions to compute the Voronoi diagram.
         centroid_points = np.array([dot.get_center()[:2] for dot in centroid_dots])
         vor = Voronoi(centroid_points)
         regions, vertices = voronoi_finite_polygons_2d(vor, radius=90)
 
-        # Define a Shapely box for clipping.
         bounding_box_shp = box(x_min, y_min, x_max, y_max)
 
         voronoi_polygons = VGroup()
         for i, region in enumerate(regions):
-            # Get the list of 2D points for this region.
             pts = [[vertices[v][0], vertices[v][1]] for v in region]
             shp_poly = ShapelyPolygon(pts)
-            # Clip with the spawn boundary.
             clipped_poly = shp_poly.intersection(bounding_box_shp)
             if clipped_poly.is_empty:
                 continue
-            # Extract exterior coordinates.
             clipped_coords = list(clipped_poly.exterior.coords)
-            # Remove the last repeated point.
             if len(clipped_coords) > 1 and clipped_coords[0] == clipped_coords[-1]:
                 clipped_coords = clipped_coords[:-1]
             manim_pts = [np.array([p[0], p[1], 0]) for p in clipped_coords]
