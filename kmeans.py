@@ -64,10 +64,8 @@ def voronoi_finite_polygons_2d(vor, radius=None):
 
 class KMeansVoronoiScene(Scene):
     def construct(self):
-        # -------------------------------
-        # ADD FORMULAS AT THE TOP
-        # -------------------------------
-        # (Your formulas go here.)
+
+
 
         # -------------------------------
         # DRAW LONG AXES AT LOWER LEFT WITH LABELS
@@ -83,12 +81,26 @@ class KMeansVoronoiScene(Scene):
         axes = VGroup(x_axis, y_axis, x_label, y_label)
         axes.to_corner(DL, buff=0.5)
 
+        self.wait(1)
+
         # Animate arrows drawing (as if they were hand-drawn)
-        self.play(Create(x_axis), run_time=2)
-        self.play(Create(y_axis), run_time=2)
+        self.play(Create(x_axis), run_time=0.5)
+        self.play(Create(y_axis), run_time=0.5)
         # Animate the text after the arrows are drawn
-        self.play(Write(x_label), run_time=1)
-        self.play(Write(y_label), run_time=1)
+        self.play(Write(x_label), run_time=0.5)
+        self.play(Write(y_label), run_time=0.5)
+        self.wait(1)
+
+        formula_assignment = MathTex(
+            r"S_{i}^{(t)}=\left\{x_{p}:\left\|x_{p}-m_{i}^{(t)}\right\|^{2}\leq \left\|x_{p}-m_{j}^{(t)}\right\|^{2}\ \forall j,1\leq j\leq k\right\}"
+        )
+        formula_update = MathTex(
+            r"m_{i}^{(t+1)}=\frac{1}{\left|S_{i}^{(t)}\right|}\sum_{x_{j}\in S_{i}^{(t)}}x_{j}"
+        )
+        formulas = VGroup(formula_assignment, formula_update).arrange(DOWN, center=True, buff=0.2)
+        formulas.scale(0.45)
+        formulas.to_edge(UP)
+        self.play(Write(formulas), run_time=0.5)
         self.wait(1)
 
         # -------------------------------
@@ -101,8 +113,8 @@ class KMeansVoronoiScene(Scene):
         cluster_centers = [
             np.array([x_min + centroid_margin, y_max - centroid_margin, 0]),  # Low X, High Y
             np.array([x_min + centroid_margin, y_min + centroid_margin, 0]),  # Low X, Low Y
-            np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0]),  # Medium X, Medium Y
-            np.array([x_max - centroid_margin, y_min + centroid_margin, 0])  # High X, Low Y
+            np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0]),             # Medium X, Medium Y
+            np.array([x_max - centroid_margin, y_min + centroid_margin, 0])      # High X, Low Y
         ]
 
         # Create data points around each cluster center.
@@ -145,7 +157,11 @@ class KMeansVoronoiScene(Scene):
         # Run several iterations of the K‑means algorithm.
         iterations = 5
         for _ in range(iterations):
-            # 1. Assign each point to the nearest centroid.
+            # 1. Assignment Step: Highlight assignment formula (blue rectangle)
+            assignment_rect = SurroundingRectangle(formula_assignment, color=BLUE, buff=0.1)
+            self.play(Create(assignment_rect), run_time=0.5)
+
+            # Assign each point to the nearest centroid.
             assignments = []
             color_anims = []
             for dot in data_dots:
@@ -156,8 +172,13 @@ class KMeansVoronoiScene(Scene):
                 color_anims.append(dot.animate.set_color(colors[cluster_index]))
             self.play(*color_anims, run_time=1)
             self.wait(0.5)
+            self.play(FadeOut(assignment_rect), run_time=0.5)
 
-            # 2. Update centroids.
+            # 2. Update Step: Highlight update formula (blue rectangle)
+            update_rect = SurroundingRectangle(formula_update, color=BLUE, buff=0.1)
+            self.play(Create(update_rect), run_time=0.5)
+
+            # Update centroids.
             new_centroid_positions = []
             for i in range(num_clusters):
                 assigned_points = [
@@ -176,6 +197,7 @@ class KMeansVoronoiScene(Scene):
                 centroid_anims.append(centroid_dot.animate.move_to(new_pos))
             self.play(*centroid_anims, run_time=1)
             self.wait(0.5)
+            self.play(FadeOut(update_rect), run_time=0.5)
 
         # Final re-assignment to update dot colors.
         assignments = []
