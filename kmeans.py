@@ -2,125 +2,227 @@ from manim import *
 import numpy as np
 import random
 from scipy.spatial import Voronoi
+from shapely.geometry import Polygon as ShapelyPolygon, box
 
+# Define spawn area boundaries (leaving space at top for formulas)
+x_min, x_max = -5, 5
+y_min, y_max = -3, 2
 
-class KMeansClusteringScene(Scene):
+def voronoi_finite_polygons_2d(vor, radius=None):
+    """
+    Reconstruct infinite Voronoi regions in a 2D diagram to finite regions.
+    Parameters
+    ----------
+    vor : Voronoi
+        Input diagram.
+    radius : float, optional
+        Distance to 'points at infinity'.
+    Returns
+    -------
+    regions : list of list of ints
+        Indices of vertices in each revised Voronoi region.
+    vertices : ndarray
+        Coordinates for revised vertices.
+    """
+    if vor.points.shape[1] != 2:
+        raise ValueError("Requires 2D input")
+
+    new_regions = []
+    new_vertices = vor.vertices.tolist()
+
+    center = vor.points.mean(axis=0)
+    if radius is None:
+        radius = vor.points.ptp().max() * 2
+
+    # Construct a map containing all ridges for a given point.
+    all_ridges = {}
+    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
+        all_ridges.setdefault(p1, []).append((p2, v1, v2))
+        all_ridges.setdefault(p2, []).append((p1, v1, v2))
+
+    # Reconstruct infinite regions.
+    for p1, region_index in enumerate(vor.point_region):
+        region = vor.regions[region_index]
+        if all(v >= 0 for v in region):
+            new_regions.append(region)
+            continue
+
+        ridges = all_ridges[p1]
+        new_region = [v for v in region if v >= 0]
+
+        for p2, v1, v2 in ridges:
+            if v2 < 0:
+                v1, v2 = v2, v1
+            if v1 >= 0:
+                continue
+
+            tangent = vor.points[p2] - vor.points[p1]
+            tangent /= np.linalg.norm(tangent)
+            normal = np.array([-tangent[1], tangent[0]])
+
+            midpoint = vor.points[[p1, p2]].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, normal)) * normal
+            far_point = vor.vertices[v2] + direction * radius
+
+            new_region.append(len(new_vertices))
+            new_vertices.append(far_point.tolist())
+
+        vs = np.array([new_vertices[v] for v in new_region])
+        c = vs.mean(axis=0)
+        angles = np.arctan2(vs[:, 1] - c[1], vs[:, 0] - c[0])
+        new_region = [v for _, v in sorted(zip(angles, new_region))]
+        new_regions.append(new_region)
+
+    return new_regions, np.array(new_vertices)
+
+class KMeansVoronoiScene(Scene):
     def construct(self):
-        # Configuration
+        # -------------------------------
+        # ADD FORMULAS AT THE TOP
+        # -------------------------------
+
+        # -------------------------------
+        # ADD LONGER AXES AT LOWER LEFT WITH TEXT ALONG OPPOSITE SIDES
+        # -------------------------------
+        x_axis = Arrow(ORIGIN, RIGHT * 10, buff=0, stroke_width=3, color=WHITE)
+        y_axis = Arrow(ORIGIN, UP * 6, buff=0, stroke_width=3, color=WHITE)
+        x_label = Tex("X")
+        x_label.move_to(x_axis.get_center() + DOWN * 0.2)
+        x_label.rotate(x_axis.get_angle())
+        y_label = Tex("Y")
+        y_label.move_to(y_axis.get_center() + LEFT * 0.2)
+        y_label.rotate(y_axis.get_angle())
+        axes = VGroup(x_axis, y_axis, x_label, y_label)
+        axes.to_corner(DL, buff=0.5)
+        self.add(axes)
+
+        # -------------------------------
+        # DRAW BOUNDARY OF THE SPAWN AREA
+        # -------------------------------
+        spawn_rect = Rectangle(width=(x_max - x_min), height=(y_max - y_min), color=WHITE)
+        spawn_rect.move_to(np.array([ (x_min+x_max)/2, (y_min+y_max)/2, 0 ]))
+        self.add(spawn_rect)
+
+        # -------------------------------
+        # PART 1: K-MEANS CLUSTERING ANIMATION
+        # -------------------------------
         num_clusters = 4
-        points_per_cluster = 20
+        points_per_cluster = 30
 
-        # Generate random cluster centers for data points.
-        true_centers = []
-        for _ in range(num_clusters):
-            # Random centers in a specified range.
-            center = np.array([random.uniform(-4, 4), random.uniform(-3, 3), 0])
-            true_centers.append(center)
+        # Generate cluster centers within the spawn area.
+        cluster_centers = [
+            np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
+            for _ in range(num_clusters)
+        ]
 
-        # Colors for clusters
-        cluster_colors = [RED, BLUE, GREEN, YELLOW]
-
-        # Generate data points around each random center.
-        all_dots = []
-        data_points = []
-        for i, center in enumerate(true_centers):
+        # Create data points around each cluster center (with Gaussian noise).
+        data_dots = VGroup()
+        for center in cluster_centers:
             for _ in range(points_per_cluster):
-                # Gaussian spread around the center.
-                point = center + np.random.normal(0, 0.7, size=3)
-                data_points.append(point)
-                dot = Dot(point, color=WHITE)
-                all_dots.append(dot)
-                self.add(dot)
+                offset = np.random.normal(0, 0.5, size=2)
+                point_position = np.array([
+                    center[0] + offset[0],
+                    center[1] + offset[1],
+                    0
+                ])
+                # (Optionally, one could force the point to be within bounds.)
+                dot = Dot(point_position, radius=0.05, color=WHITE)
+                data_dots.add(dot)
 
+        self.play(FadeIn(data_dots), run_time=2)
         self.wait(1)
 
-        # Randomly initialize centroids (as small colored dots).
-        centroids = []
-        centroid_positions = []
+        # Initialize centroids at random positions within the spawn area.
+        centroid_positions = [
+            np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
+            for _ in range(num_clusters)
+        ]
+        centroid_dots = VGroup()
+        colors = [RED, GREEN, BLUE, YELLOW]
         for i in range(num_clusters):
-            pos = np.array([random.uniform(-5, 5), random.uniform(-5, 5), 0])
-            centroid_positions.append(pos)
-            centroid_dot = Dot(pos, color=cluster_colors[i], radius=0.15)
-            centroids.append(centroid_dot)
-            self.add(centroid_dot)
+            centroid_dot = Dot(centroid_positions[i], radius=0.1, color=colors[i])
+            centroid_dot.cluster_index = i
+            centroid_dots.add(centroid_dot)
 
+        self.play(FadeIn(centroid_dots))
         self.wait(1)
 
-        # Perform several iterations of K-means clustering.
-        for iteration in range(4):
-            # Assign points to the nearest centroid.
-            assignments = {i: [] for i in range(num_clusters)}
-            for dot, point in zip(all_dots, data_points):
-                distances = [np.linalg.norm(point - centroid_positions[i])
-                             for i in range(num_clusters)]
+        # Run several iterations of the K‑means algorithm.
+        iterations = 5
+        for _ in range(iterations):
+            # 1. Assign each point to the nearest centroid.
+            assignments = []
+            color_anims = []
+            for dot in data_dots:
+                point = dot.get_center()
+                distances = [np.linalg.norm(point - c.get_center()) for c in centroid_dots]
                 cluster_index = int(np.argmin(distances))
-                assignments[cluster_index].append(point)
-                dot.set_color(cluster_colors[cluster_index])
-            self.wait(1)
+                assignments.append(cluster_index)
+                color_anims.append(dot.animate.set_color(colors[cluster_index]))
+            self.play(*color_anims, run_time=1)
+            self.wait(0.5)
 
-            # Update centroid positions based on the mean of their assigned points.
+            # 2. Update centroids to the mean of their assigned points.
             new_centroid_positions = []
-            animations = []
             for i in range(num_clusters):
-                if assignments[i]:
-                    new_pos = np.mean(assignments[i], axis=0)
+                assigned_points = [
+                    dot.get_center()
+                    for dot, assign in zip(data_dots, assignments)
+                    if assign == i
+                ]
+                if assigned_points:
+                    new_pos = np.mean(assigned_points, axis=0)
                 else:
-                    new_pos = centroid_positions[i]
+                    new_pos = np.array([random.uniform(x_min, x_max), random.uniform(y_min, y_max), 0])
                 new_centroid_positions.append(new_pos)
-                animations.append(centroids[i].animate.move_to(new_pos))
-            self.play(*animations, run_time=2)
-            centroid_positions = new_centroid_positions
-            self.wait(1)
 
-        # Final color reassignment based on the final centroids.
-        final_assignments = {i: [] for i in range(num_clusters)}
-        for dot, point in zip(all_dots, data_points):
-            distances = [np.linalg.norm(point - centroid_positions[i])
-                         for i in range(num_clusters)]
+            centroid_anims = []
+            for centroid_dot, new_pos in zip(centroid_dots, new_centroid_positions):
+                centroid_anims.append(centroid_dot.animate.move_to(new_pos))
+            self.play(*centroid_anims, run_time=1)
+            self.wait(0.5)
+
+        # Final re-assignment so dot colors match the final centroids.
+        assignments = []
+        color_anims = []
+        for dot in data_dots:
+            point = dot.get_center()
+            distances = [np.linalg.norm(point - c.get_center()) for c in centroid_dots]
             cluster_index = int(np.argmin(distances))
-            final_assignments[cluster_index].append(point)
-            dot.set_color(cluster_colors[cluster_index])
-        self.wait(1)
+            assignments.append(cluster_index)
+            color_anims.append(dot.animate.set_color(colors[cluster_index]))
+        self.play(*color_anims, run_time=1)
+        self.wait(0.5)
 
-        # After clustering, draw a Voronoi diagram using the final centroids.
-        # We need 2D points (drop the z-coordinate).
-        centroid_positions_2d = np.array([pos[:2] for pos in centroid_positions])
-        vor = Voronoi(centroid_positions_2d)
+        # -------------------------------
+        # PART 2: DRAW THE VORONOI DIAGRAM CLIPPED TO THE SPAWN AREA
+        # -------------------------------
+        # Use the final centroid positions to compute the Voronoi diagram.
+        centroid_points = np.array([dot.get_center()[:2] for dot in centroid_dots])
+        vor = Voronoi(centroid_points)
+        regions, vertices = voronoi_finite_polygons_2d(vor, radius=90)
 
-        # Helper function: compute finite segments for the Voronoi diagram.
-        def voronoi_finite_segments(vor, radius=10):
-            segments = []
-            center = vor.points.mean(axis=0)
-            for (p1, p2), simplex in zip(vor.ridge_points, vor.ridge_vertices):
-                simplex = np.asarray(simplex)
-                if np.all(simplex >= 0):
-                    start = vor.vertices[simplex[0]]
-                    end = vor.vertices[simplex[1]]
-                    segments.append((start, end))
-                else:
-                    # For an infinite ridge, extend from the finite vertex.
-                    finite_vert = vor.vertices[simplex[simplex >= 0][0]]
-                    # Compute the direction vector.
-                    t = vor.points[p2] - vor.points[p1]
-                    t = t / np.linalg.norm(t)
-                    n = np.array([-t[1], t[0]])
-                    midpoint = vor.points[[p1, p2]].mean(axis=0)
-                    sign = np.sign(np.dot(midpoint - center, n))
-                    direction = sign * n
-                    far_point = finite_vert + direction * radius
-                    segments.append((finite_vert, far_point))
-            return segments
+        # Define a Shapely box for clipping.
+        bounding_box_shp = box(x_min, y_min, x_max, y_max)
 
-        segments = voronoi_finite_segments(vor, radius=10)
+        voronoi_polygons = VGroup()
+        for i, region in enumerate(regions):
+            # Get the list of 2D points for this region.
+            pts = [[vertices[v][0], vertices[v][1]] for v in region]
+            shp_poly = ShapelyPolygon(pts)
+            # Clip with the spawn boundary.
+            clipped_poly = shp_poly.intersection(bounding_box_shp)
+            if clipped_poly.is_empty:
+                continue
+            # Extract exterior coordinates.
+            clipped_coords = list(clipped_poly.exterior.coords)
+            # Remove the last repeated point.
+            if len(clipped_coords) > 1 and clipped_coords[0] == clipped_coords[-1]:
+                clipped_coords = clipped_coords[:-1]
+            manim_pts = [np.array([p[0], p[1], 0]) for p in clipped_coords]
+            poly = Polygon(*manim_pts, color=colors[i], stroke_width=3)
+            poly.set_fill(colors[i], opacity=0.2)
+            voronoi_polygons.add(poly)
 
-        # Draw the Voronoi diagram (convert 2D points to 3D by adding z=0).
-        voronoi_lines = VGroup()
-        for seg in segments:
-            start, end = seg
-            start_3d = np.append(start, 0)
-            end_3d = np.append(end, 0)
-            line = Line(start_3d, end_3d, color=WHITE)
-            voronoi_lines.add(line)
-
-        self.play(Create(voronoi_lines), run_time=2)
+        self.play(Create(voronoi_polygons), run_time=2)
         self.wait(2)
