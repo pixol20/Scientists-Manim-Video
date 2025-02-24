@@ -67,25 +67,29 @@ class KMeansVoronoiScene(Scene):
         # -------------------------------
         # ADD FORMULAS AT THE TOP
         # -------------------------------
+        # (Your formulas go here.)
 
         # -------------------------------
         # DRAW LONG AXES AT LOWER LEFT WITH LABELS
         # -------------------------------
         x_axis = Arrow(ORIGIN, RIGHT * 10, buff=0, stroke_width=3, color=WHITE)
         y_axis = Arrow(ORIGIN, UP * 6, buff=0, stroke_width=3, color=WHITE)
-        x_label = Tex("X")
-        x_label.move_to(x_axis.get_center() + DOWN * 0.2)
+        x_label = Text("Знання", font="Calibri")
+        x_label.move_to(x_axis.get_center() + DOWN * 0.3)
         x_label.rotate(x_axis.get_angle())
-        y_label = Tex("Y")
-        y_label.move_to(y_axis.get_center() + LEFT * 0.2)
+        y_label = Text("Страх", font="Calibri")
+        y_label.move_to(y_axis.get_center() + LEFT * 0.3)
         y_label.rotate(y_axis.get_angle())
         axes = VGroup(x_axis, y_axis, x_label, y_label)
         axes.to_corner(DL, buff=0.5)
-        self.add(axes)
 
-        # -------------------------------
-        # DO NOT DRAW THE SPAWN AREA BORDER (removed white border)
-        # -------------------------------
+        # Animate arrows drawing (as if they were hand-drawn)
+        self.play(Create(x_axis), run_time=2)
+        self.play(Create(y_axis), run_time=2)
+        # Animate the text after the arrows are drawn
+        self.play(Write(x_label), run_time=1)
+        self.play(Write(y_label), run_time=1)
+        self.wait(1)
 
         # -------------------------------
         # PART 1: K-MEANS CLUSTERING ANIMATION
@@ -93,19 +97,15 @@ class KMeansVoronoiScene(Scene):
         num_clusters = 4
         points_per_cluster = 30
 
-        # Use fixed cluster centers at selected areas with a larger offset from the borders:
-        #   - Low X, High Y
-        #   - Low X, Low Y
-        #   - Medium X, Medium Y
-        #   - High X, Low Y
+        # Fixed cluster centers (with margin offsets)
         cluster_centers = [
             np.array([x_min + centroid_margin, y_max - centroid_margin, 0]),  # Low X, High Y
             np.array([x_min + centroid_margin, y_min + centroid_margin, 0]),  # Low X, Low Y
-            np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0]),             # Medium X, Medium Y
-            np.array([x_max - centroid_margin, y_min + centroid_margin, 0])       # High X, Low Y
+            np.array([(x_min + x_max) / 2, (y_min + y_max) / 2, 0]),  # Medium X, Medium Y
+            np.array([x_max - centroid_margin, y_min + centroid_margin, 0])  # High X, Low Y
         ]
 
-        # Create data points around each fixed cluster center (with Gaussian noise).
+        # Create data points around each cluster center.
         data_dots = VGroup()
         for center in cluster_centers:
             for _ in range(points_per_cluster):
@@ -115,7 +115,6 @@ class KMeansVoronoiScene(Scene):
                     center[1] + offset[1],
                     0
                 ])
-                # Clamp the point within bounds.
                 point_position = np.array([
                     np.clip(raw_point[0], x_min + margin, x_max - margin),
                     np.clip(raw_point[1], y_min + margin, y_max - margin),
@@ -127,8 +126,7 @@ class KMeansVoronoiScene(Scene):
         self.play(FadeIn(data_dots), run_time=2)
         self.wait(1)
 
-        # Initialize centroids at random positions within the spawn area,
-        # ensuring they are offset from the borders by centroid_margin.
+        # Initialize centroids at random positions.
         centroid_positions = [
             np.array([random.uniform(x_min + centroid_margin, x_max - centroid_margin),
                       random.uniform(y_min + centroid_margin, y_max - centroid_margin), 0])
@@ -159,7 +157,7 @@ class KMeansVoronoiScene(Scene):
             self.play(*color_anims, run_time=1)
             self.wait(0.5)
 
-            # 2. Update centroids to the mean of their assigned points.
+            # 2. Update centroids.
             new_centroid_positions = []
             for i in range(num_clusters):
                 assigned_points = [
@@ -170,7 +168,6 @@ class KMeansVoronoiScene(Scene):
                 if assigned_points:
                     new_pos = np.mean(assigned_points, axis=0)
                 else:
-                    # If no points were assigned, keep the centroid in place.
                     new_pos = centroid_dots[i].get_center()
                 new_centroid_positions.append(new_pos)
 
@@ -180,7 +177,7 @@ class KMeansVoronoiScene(Scene):
             self.play(*centroid_anims, run_time=1)
             self.wait(0.5)
 
-        # Final re-assignment so dot colors match the final centroids.
+        # Final re-assignment to update dot colors.
         assignments = []
         color_anims = []
         for dot in data_dots:
@@ -198,7 +195,6 @@ class KMeansVoronoiScene(Scene):
         centroid_points = np.array([dot.get_center()[:2] for dot in centroid_dots])
         vor = Voronoi(centroid_points)
         regions, vertices = voronoi_finite_polygons_2d(vor, radius=90)
-
         bounding_box_shp = box(x_min, y_min, x_max, y_max)
 
         voronoi_polygons = VGroup()
@@ -212,9 +208,14 @@ class KMeansVoronoiScene(Scene):
             if len(clipped_coords) > 1 and clipped_coords[0] == clipped_coords[-1]:
                 clipped_coords = clipped_coords[:-1]
             manim_pts = [np.array([p[0], p[1], 0]) for p in clipped_coords]
+            # Create polygon with visible stroke but invisible fill initially.
             poly = Polygon(*manim_pts, color=colors[i], stroke_width=3)
-            poly.set_fill(colors[i], opacity=0.2)
+            poly.set_fill(colors[i], opacity=0)  # Start with fill invisible
             voronoi_polygons.add(poly)
 
+        # First, draw the Voronoi borders.
         self.play(Create(voronoi_polygons), run_time=2)
+        self.wait(1)
+        # Then, fade in the fill of each cell.
+        self.play(*[poly.animate.set_fill(opacity=0.2) for poly in voronoi_polygons], run_time=2)
         self.wait(2)
