@@ -78,9 +78,9 @@ class PointerExample(Scene):
         self.play(Write(replacement_text), run_time=1)
         self.wait(1)
 
-        # 9. Draw an arrow from the pointer text to the original memory cell.
+        # 9. Draw an arrow from the middle of the pointer text to the original memory cell.
         arrow = Arrow(
-            start=replacement_text.get_left(),
+            start=replacement_text.get_center() + DOWN * 0.1,
             end=selected_cell.get_right(),
             buff=0.1,
             stroke_width=2,
