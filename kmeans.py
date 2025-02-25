@@ -97,7 +97,7 @@ class KMeansVoronoiScene(Scene):
         formula_update = MathTex(
             r"m_{i}^{(t+1)}=\frac{1}{\left|S_{i}^{(t)}\right|}\sum_{x_{j}\in S_{i}^{(t)}}x_{j}"
         )
-        formulas = VGroup(formula_assignment, formula_update).arrange(DOWN, center=True, buff=0.2)
+        formulas = VGroup(formula_assignment, formula_update).arrange(DOWN, center=True, buff=0.4)
         formulas.scale(0.45)
         formulas.to_edge(UP)
         self.play(Write(formulas), run_time=0.5)
@@ -145,7 +145,7 @@ class KMeansVoronoiScene(Scene):
             for _ in range(num_clusters)
         ]
         centroid_dots = VGroup()
-        colors = [RED, GREEN, BLUE, PURPLE]
+        colors = [RED, GREEN, BLUE, ORANGE]
         for i in range(num_clusters):
             centroid_dot = Dot(centroid_positions[i], radius=0.1, color=colors[i])
             centroid_dot.cluster_index = i
