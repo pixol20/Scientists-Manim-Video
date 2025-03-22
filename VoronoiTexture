@@ -1,0 +1,38 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import cKDTree
+
+# Parameters
+width, height = 1000, 1000  # Image dimensions
+num_points = 30           # Number of feature points
+
+# For reproducibility
+np.random.seed(46)
+
+# Generate random feature points in the image
+points = np.random.rand(num_points, 2) * np.array([width, height])
+
+# Create a grid of (x, y) coordinates for each pixel
+x = np.arange(width)
+y = np.arange(height)
+xx, yy = np.meshgrid(x, y)
+grid_points = np.column_stack((xx.ravel(), yy.ravel()))
+
+# Build a KD-tree for efficient nearest-neighbor queries
+tree = cKDTree(points)
+
+# For each pixel, compute the distance to its nearest feature point
+distances, _ = tree.query(grid_points, k=1)
+distances = distances.reshape((height, width))
+
+# Normalize distances for better visualization
+norm_distances = distances / distances.max()
+
+# Plot the Worley noise texture
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.imshow(norm_distances, origin='lower', cmap='gray')
+ax.scatter(points[:, 0], points[:, 1], color='red', s=50)  # Mark feature points in red
+
+# Remove axis for a clean look
+ax.axis('off')
+plt.show()
